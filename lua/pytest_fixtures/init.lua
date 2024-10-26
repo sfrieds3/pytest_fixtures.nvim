@@ -1,54 +1,48 @@
+local M = {}
 local Path = require("plenary.path")
 local Job = require("plenary.job")
 local TSUtils = require("nvim-treesitter.ts_utils")
 
-local project_markers = { ".git", "pyproject.toml", "setup.py", "setup.cfg" }
-
 --- Get project root for a given file based on configured project_markers
 ---@param file string filename for which to find root directory
 ---@return string? root directory for `file`
-local function get_project_root(file)
-  return vim.fs.root(vim.fn.expand(file), project_markers)
+function M.get_project_root(file)
+  return vim.fs.root(vim.fn.expand(file), M.project_markers)
 end
 
-local data_path = string.format("%s/pytest_fixtures", vim.fn.stdpath("data"))
-local data_path_exists = false
-
 --- Ensure configured data path exists
-local function ensure_data_path_exists()
-  if data_path_exists then
+function M.ensure_data_path_exists()
+  if M.data_path_exists then
     return
   end
 
-  local path = Path:new(data_path)
+  local path = Path:new(M.data_path)
   if not path:exists() then
     path:mkdir()
   end
-  data_path_exists = true
+  M.data_path_exists = true
 end
-
-ensure_data_path_exists()
 
 --- Get a `Path` object to store pytest fixture data for a project
 ---@param project_hash string unique hash for project
 ---@return Path path object to store project data
-local function get_storage_path_for_project(project_hash)
-  local full_path = string.format("%s/%s.json", data_path, project_hash)
+function M.get_storage_path_for_project(project_hash)
+  local full_path = string.format("%s/%s.json", M.data_path, project_hash)
   return Path:new(full_path)
 end
 
 --- Store fixture to unique `project_hash` location for project
 ---@param project_hash string unique hash for project
 ---@param fixtures table pytest fixtures for a given file  -- TODO: better typing for this
-local function store_fixtures(project_hash, fixtures)
-  local path = get_storage_path_for_project(project_hash)
+function M.store_fixtures(project_hash, fixtures)
+  local path = M.get_storage_path_for_project(project_hash)
   path:write(vim.json.encode(fixtures), "w")
 end
 
 --- Read project fixtures from cache
 ---@param file_path Path path to project fixture cache file
 ---@return table fixtures
-local function get_fixtures(file_path)
+function M.get_fixtures(file_path)
   local path = Path:new(file_path)
   local raw_fixtures = path:read()
 
@@ -56,15 +50,15 @@ local function get_fixtures(file_path)
   return fixtures
 end
 
-local ts_query_text = [[
+M.ts_query_text = [[
 (function_definition
   name: (identifier) @function
   #match? @function "test_")
   ]]
 
 --- Get the parent test function for the node under cursor
----@return string function name
-local function get_parent_test_function()
+---@return string? function name
+function M.get_parent_test_function()
   local node_at_cursor = TSUtils.get_node_at_cursor()
 
   while node_at_cursor do
@@ -86,7 +80,7 @@ end
 --- Convert `target_path` absolute path to a path relative to `base_dir`
 ---@param base_dir string base directory
 ---@param target_path string directory
-local function get_relative_path(base_dir, target_path)
+function M.get_relative_path(base_dir, target_path)
   local base_abs = vim.fn.fnamemodify(base_dir, ":p")
   local target_abs = vim.fn.fnamemodify(target_path, ":p")
 
@@ -98,13 +92,17 @@ local function get_relative_path(base_dir, target_path)
 end
 
 --- Get details about the test under cursor
----@return string, string, string[] relative file name, function name, function args
-local function get_current_test_info()
-  local function_name = get_parent_test_function()
+---@return string?, string?, string?[] relative file name, function name, function args
+function M.get_current_test_info()
+  local function_name = M.get_parent_test_function()
+  if function_name == nil then
+    print("No test function found under cursor")
+    return nil, nil, nil
+  end
   local test_file = vim.fn.expand("%")
-  local project_root = get_project_root(test_file)
+  local project_root = M.get_project_root(test_file)
   assert(project_root, "project root should not be nil")
-  local relative_file_name = get_relative_path(project_root, test_file)
+  local relative_file_name = M.get_relative_path(project_root, test_file)
 
   -- Query the arguments of the function
   local query_string = [[
@@ -136,7 +134,7 @@ end
 --- Store pytest fixtures in cache dir
 ---@param project_hash string filename for project fixture cache
 ---@param output_lines string[] pytest command result to parse
-local function parse_and_store_project_fixtures(project_hash, output_lines)
+function M.parse_and_store_project_fixtures(project_hash, output_lines)
   local fixtures = setmetatable({}, {
     __index = function(tbl, key)
       tbl[key] = {}
@@ -172,19 +170,19 @@ local function parse_and_store_project_fixtures(project_hash, output_lines)
     end
   end
 
-  store_fixtures(project_hash, fixtures)
+  M.store_fixtures(project_hash, fixtures)
 end
 
 --- Kick off a `Job` to refresh the pytest fixture cache for this project
 ---@param project_hash string unique hash for project, used as filename for cache
-local function refresh_pytest_fixture_cache(project_hash)
+function M.refresh_pytest_fixture_cache(project_hash)
   local result = {}
   Job:new({
     command = "pytest",
     args = { "--fixtures-per-test" },
     on_exit = function(j, _)
       result = j:result()
-      parse_and_store_project_fixtures(project_hash, result)
+      M.parse_and_store_project_fixtures(project_hash, result)
     end,
   }):start()
 end
@@ -192,7 +190,7 @@ end
 --- Determine if the a given filename is of python ft
 ---@param filename string filename
 ---@return boolean
-local function is_python(filename)
+function M.is_python(filename)
   local buf = vim.fn.bufadd(vim.fn.expand(filename))
   vim.fn.bufload(buf)
   local filetype = vim.bo[buf].filetype
@@ -201,14 +199,19 @@ end
 
 --- Determine if pytest is an executable on PATH
 ---@return boolean
-local function has_pytest()
-  return vim.fn.executable("pytest") == 1
+function M.has_pytest()
+  if vim.fn.executable("pytest") == 1 then
+    return true
+  else
+    print("Could not find pytest executable..")
+    return false
+  end
 end
 
 --- Additional predicate check to determine if we should refesh fixture cache
 ---@param project_hash string unique hash for project
 ---@return boolean
-local function should_refresh_fixtures(project_hash)
+function M.should_refresh_fixtures(project_hash)
   _ = project_hash
   -- TODO: need to add a delay here
   return false
@@ -217,7 +220,7 @@ end
 --- Generate a unique hash for the project, based on `project_root`
 ---@param project_root string fully qualified project root
 ---@return string unique hash
-local function generate_project_hash(project_root)
+function M.generate_project_hash(project_root)
   local project_hash = vim.fn.sha256(project_root)
   return project_hash
 end
@@ -225,11 +228,11 @@ end
 --- Get the current project root and corresponding hash
 ---@param buf_file string? file to determine project root of
 ---@return string, string project_root and hash
-local function get_current_project_and_hash(buf_file)
+function M.get_current_project_and_hash(buf_file)
   buf_file = buf_file or vim.fn.expand("%")
-  local project_root = get_project_root(buf_file)
+  local project_root = M.get_project_root(buf_file)
   assert(project_root, "project root should not be nil")
-  local hash = generate_project_hash(project_root)
+  local hash = M.generate_project_hash(project_root)
   return project_root, hash
 end
 
@@ -237,10 +240,10 @@ end
 ---@param test_file_name string file name of test
 ---@param test_name string of test
 ---@return table[string] fixture details
-local function parse_fixtures_for_test(test_file_name, test_name)
-  local _, project_hash = get_current_project_and_hash()
-  local project_fixture_file_path = get_storage_path_for_project(project_hash)
-  local fixtures = get_fixtures(project_fixture_file_path)
+function M.parse_fixtures_for_test(test_file_name, test_name)
+  local _, project_hash = M.get_current_project_and_hash()
+  local project_fixture_file_path = M.get_storage_path_for_project(project_hash)
+  local fixtures = M.get_fixtures(project_fixture_file_path)
   local function_fixtures = fixtures[test_file_name][test_name]
   return function_fixtures
 end
@@ -248,15 +251,19 @@ end
 --- Open a file at a specified line number
 ---@param file_path string file path to open
 ---@param line_number integer line number to jump to
-local function open_file_at_line(file_path, line_number)
+function M.open_file_at_line(file_path, line_number)
   vim.cmd("edit " .. file_path)
   vim.api.nvim_win_set_cursor(0, { line_number, 0 })
 end
 
 --- Find fixtures associated with test under cursor and prompt to go to them
-local function goto_fixture()
-  local test_file_name, test_name, test_args = get_current_test_info()
-  local function_fixtures = parse_fixtures_for_test(test_file_name, test_name)
+function M.goto_fixture()
+  local test_file_name, test_name, test_args = M.get_current_test_info()
+  if test_file_name == nil or test_name == nil then
+    return
+  end
+
+  local function_fixtures = M.parse_fixtures_for_test(test_file_name, test_name)
   if function_fixtures == nil then
     print("No fixtures found!")
     return
@@ -279,44 +286,55 @@ local function goto_fixture()
     local fixture_info = function_fixtures[fixture]
     local fixture_line_number = tonumber(fixture_info.line_number) or 0
     -- TODO: should add to tagstack (and make this configurable)
-    open_file_at_line(fixture_info.file_path, fixture_line_number)
+    M.open_file_at_line(fixture_info.file_path, fixture_line_number)
   end)
 end
 
-local function maybe_refresh_pytest_fixture_cache(buf_file, opts)
+function M.maybe_refresh_pytest_fixture_cache(buf_file, opts)
   opts = opts or {}
   local force = opts.force or false
-  local project_root, project_hash = get_current_project_and_hash(buf_file)
+  local project_root, project_hash = M.get_current_project_and_hash(buf_file)
 
-  if force or (project_root and is_python(buf_file) and has_pytest() and should_refresh_fixtures(project_hash)) then
-    refresh_pytest_fixture_cache(project_hash)
+  if
+    M.has_pytest() and force or (project_root and M.is_python(buf_file) and M.should_refresh_fixtures(project_hash))
+  then
+    M.refresh_pytest_fixture_cache(project_hash)
   end
 end
 
-vim.api.nvim_create_autocmd("FileType", {
-  pattern = "python",
-  group = vim.api.nvim_create_augroup("pytest_fixtures:user-commands", { clear = true }),
-  callback = function()
-    vim.api.nvim_create_user_command("PytestFixturesRefresh", function()
-      print("Refreshing for " .. vim.fn.expand("%:p"))
-      maybe_refresh_pytest_fixture_cache(vim.fn.expand("%"), { force = true })
-    end, {})
-    vim.api.nvim_create_user_command("PytestFixturesProjectCachePath", function()
-      local _, project_hash = get_current_project_and_hash()
-      local cache = get_storage_path_for_project(project_hash)
-      print("Project cache location: ", cache)
-    end, {})
-  end,
-})
+function M.setup(opts)
+  M.project_markers = { ".git", "pyproject.toml", "setup.py", "setup.cfg" }
+  M.data_path = string.format("%s/pytest_fixtures", vim.fn.stdpath("data"))
+  M.data_path_exists = false
+  M.ensure_data_path_exists()
 
-vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter", "BufWritePost" }, {
-  group = vim.api.nvim_create_augroup("pytest_fixtures:refresh", { clear = true }),
-  pattern = { "*.py", "*.pyi" },
-  callback = function(ev)
-    maybe_refresh_pytest_fixture_cache(ev.file)
-  end,
-})
+  vim.api.nvim_create_autocmd("FileType", {
+    pattern = "python",
+    group = vim.api.nvim_create_augroup("pytest_fixtures:user-commands", { clear = true }),
+    callback = function()
+      vim.api.nvim_create_user_command("PytestFixturesRefresh", function()
+        print("Refreshing for " .. vim.fn.expand("%:p"))
+        M.maybe_refresh_pytest_fixture_cache(vim.fn.expand("%"), { force = true })
+      end, {})
+      vim.api.nvim_create_user_command("PytestFixturesProjectCachePath", function()
+        local _, project_hash = M.get_current_project_and_hash()
+        local cache = M.get_storage_path_for_project(project_hash)
+        print("Project cache location: ", cache)
+      end, {})
+    end,
+  })
 
-vim.keymap.set("n", "<localleader>]", function()
-  goto_fixture()
-end, { desc = "PytestFixtures Go To Fixture" })
+  vim.api.nvim_create_autocmd({ "BufEnter", "BufWinEnter", "BufWritePost" }, {
+    group = vim.api.nvim_create_augroup("pytest_fixtures:refresh", { clear = true }),
+    pattern = { "*.py", "*.pyi" },
+    callback = function(ev)
+      M.maybe_refresh_pytest_fixture_cache(ev.file)
+    end,
+  })
+
+  vim.keymap.set("n", "<localleader>]", function()
+    M.goto_fixture()
+  end, { desc = "PytestFixtures Go To Fixture" })
+end
+
+return M
