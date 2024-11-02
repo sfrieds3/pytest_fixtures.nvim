@@ -198,36 +198,12 @@ end
 
 --- Kick off a `Job` to refresh the pytest fixture cache for this project
 ---@param project_hash string unique hash for project, used as filename for cache
-function M.refresh_pytest_fixture_cache_old(project_hash)
-  local result = {}
-  Job:new({
-    command = "pytest",
-    args = { "--fixtures-per-test" },
-    on_exit = function(j, _)
-      result = j:result()
-      M.parse_and_store_project_fixtures(project_hash, result)
-    end,
-  }):start()
-end
-
---- Kick off a `Job` to refresh the pytest fixture cache for this project
----@param project_hash string unique hash for project, used as filename for cache
 function M.refresh_pytest_fixture_cache(project_hash)
   local function on_exit(out)
     local output_lines = vim.split(out.stdout, "\n", { trimempty = true })
     M.parse_and_store_project_fixtures(project_hash, output_lines)
   end
   local result = vim.system({ "pytest", "--fixtures-per-test" }, { text = true }, on_exit)
-  --
-  -- local result = {}
-  -- Job:new({
-  --   command = "pytest",
-  --   args = { "--fixtures-per-test" },
-  --   on_exit = function(j, _)
-  --     result = j:result()
-  --     M.parse_and_store_project_fixtures(project_hash, result)
-  --   end,
-  -- }):start()
 end
 
 --- Determine if the a given filename is of python ft
