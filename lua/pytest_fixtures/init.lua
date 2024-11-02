@@ -36,7 +36,27 @@ end
 ---@param fixtures table pytest fixtures for a given file  -- TODO: better typing for this
 function M.store_fixtures(project_hash, fixtures)
   local path = M.get_storage_path_for_project(project_hash)
-  path:write(vim.json.encode(fixtures), "w")
+  local json_encoded = vim.json.encode(fixtures)
+
+  vim.uv.fs_open(path:absolute(), "w", 493, function(open_err, fd)
+    if open_err ~= nil then
+      print("Error opening file: ", open_err)
+      return
+    end
+
+    vim.uv.fs_write(fd, vim.json.encode(fixtures), -1, function(write_err, bytes)
+      if write_err ~= nil then
+        print("Error writing file: ", write_err)
+        return
+      end
+
+      vim.uv.fs_close(fd, function(close_err)
+        if close_err ~= nil then
+          print("Error closing file: ", close_err)
+        end
+      end)
+    end)
+  end)
 end
 
 --- Read project fixtures from cache
@@ -101,7 +121,10 @@ function M.get_current_test_info()
   end
   local test_file = vim.fn.expand("%")
   local project_root = M.get_project_root(test_file)
-  assert(project_root, "project root should not be nil")
+  if project_root == nil then
+    print("Could not find project root; exiting..")
+    return
+  end
   local relative_file_name = M.get_relative_path(project_root, test_file)
 
   -- Query the arguments of the function
@@ -175,7 +198,7 @@ end
 
 --- Kick off a `Job` to refresh the pytest fixture cache for this project
 ---@param project_hash string unique hash for project, used as filename for cache
-function M.refresh_pytest_fixture_cache(project_hash)
+function M.refresh_pytest_fixture_cache_old(project_hash)
   local result = {}
   Job:new({
     command = "pytest",
@@ -185,6 +208,26 @@ function M.refresh_pytest_fixture_cache(project_hash)
       M.parse_and_store_project_fixtures(project_hash, result)
     end,
   }):start()
+end
+
+--- Kick off a `Job` to refresh the pytest fixture cache for this project
+---@param project_hash string unique hash for project, used as filename for cache
+function M.refresh_pytest_fixture_cache(project_hash)
+  local function on_exit(out)
+    local output_lines = vim.split(out.stdout, "\n", { trimempty = true })
+    M.parse_and_store_project_fixtures(project_hash, output_lines)
+  end
+  local result = vim.system({ "pytest", "--fixtures-per-test" }, { text = true }, on_exit)
+  --
+  -- local result = {}
+  -- Job:new({
+  --   command = "pytest",
+  --   args = { "--fixtures-per-test" },
+  --   on_exit = function(j, _)
+  --     result = j:result()
+  --     M.parse_and_store_project_fixtures(project_hash, result)
+  --   end,
+  -- }):start()
 end
 
 --- Determine if the a given filename is of python ft
@@ -298,6 +341,7 @@ function M.maybe_refresh_pytest_fixture_cache(buf_file, opts)
   if
     M.has_pytest() and force or (project_root and M.is_python(buf_file) and M.should_refresh_fixtures(project_hash))
   then
+    print("pytest_nvim refreshing cache for " .. vim.fn.expand("%:p"))
     M.refresh_pytest_fixture_cache(project_hash)
   end
 end
@@ -313,7 +357,6 @@ function M.setup(opts)
     group = vim.api.nvim_create_augroup("pytest_fixtures:user-commands", { clear = true }),
     callback = function()
       vim.api.nvim_create_user_command("PytestFixturesRefresh", function()
-        print("Refreshing for " .. vim.fn.expand("%:p"))
         M.maybe_refresh_pytest_fixture_cache(vim.fn.expand("%"), { force = true })
       end, {})
       vim.api.nvim_create_user_command("PytestFixturesProjectCachePath", function()
