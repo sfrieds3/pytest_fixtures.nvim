@@ -33,10 +33,15 @@ end
 
 --- Store fixture to unique `project_hash` location for project
 ---@param project_hash string unique hash for project
----@param fixtures table pytest fixtures for a given file  -- TODO: better typing for this
-function M.store_fixtures(project_hash, fixtures)
+---@param fixtures_by_test table pytest fixtures for a given file  -- TODO: better typing for this
+---@param all_fixtures table all project fixtures
+function M.store_fixtures(project_hash, fixtures_by_test, all_fixtures)
   local path = M.get_storage_path_for_project(project_hash)
-  local json_encoded = vim.json.encode(fixtures)
+  local fixtures = {
+    fixtures_by_test = fixtures_by_test,
+    all_fixtures = all_fixtures,
+  }
+  local json_encoded_fixtures = vim.json.encode(fixtures)
 
   vim.uv.fs_open(path:absolute(), "w", 493, function(open_err, fd)
     if open_err ~= nil then
@@ -44,7 +49,7 @@ function M.store_fixtures(project_hash, fixtures)
       return
     end
 
-    vim.uv.fs_write(fd, vim.json.encode(fixtures), -1, function(write_err, bytes)
+    vim.uv.fs_write(fd, json_encoded_fixtures, -1, function(write_err, bytes)
       if write_err ~= nil then
         print("Error writing file: ", write_err)
         return
@@ -61,13 +66,14 @@ end
 
 --- Read project fixtures from cache
 ---@param file_path Path path to project fixture cache file
+---@param fixture_key string fixture key to return (e.g. `fixtures_by_test`, `all_fixtures`)
 ---@return table fixtures
-function M.get_fixtures(file_path)
+function M.get_fixtures(file_path, fixture_key)
   local path = Path:new(file_path)
   local raw_fixtures = path:read()
 
   local fixtures = vim.json.decode(raw_fixtures)
-  return fixtures
+  return fixtures[fixture_key]
 end
 
 M.ts_query_text = [[
@@ -158,12 +164,14 @@ end
 ---@param project_hash string filename for project fixture cache
 ---@param output_lines string[] pytest command result to parse
 function M.parse_and_store_project_fixtures(project_hash, output_lines)
-  local fixtures = setmetatable({}, {
+  local fixtures_by_test = setmetatable({}, {
     __index = function(tbl, key)
       tbl[key] = {}
       return tbl[key]
     end,
   })
+
+  local all_fixtures = {}
 
   local current_test_name = nil
   local current_test_file_path = nil
@@ -173,7 +181,7 @@ function M.parse_and_store_project_fixtures(project_hash, output_lines)
     if last_line_was_test_heading then
       current_test_file_path = line:match("%((.-):")
       assert(current_test_name, "current test name is nil")
-      fixtures[current_test_file_path][current_test_name] = {}
+      fixtures_by_test[current_test_file_path][current_test_name] = {}
       last_line_was_test_heading = false
     else
       local test_match = line:match("fixtures used by ([%w_]+)")
@@ -184,7 +192,11 @@ function M.parse_and_store_project_fixtures(project_hash, output_lines)
       elseif current_test_name then
         local fixture_name, file_path, line_number = line:match("([%w_]+)%s*%-%-%s*([%w%p]+):(%d+)")
         if fixture_name and file_path then
-          fixtures[current_test_file_path][current_test_name][fixture_name] = {
+          fixtures_by_test[current_test_file_path][current_test_name][fixture_name] = {
+            file_path = file_path,
+            line_number = line_number,
+          }
+          all_fixtures[string.format("%s:%s", file_path, fixture_name)] = {
             file_path = file_path,
             line_number = line_number,
           }
@@ -193,7 +205,7 @@ function M.parse_and_store_project_fixtures(project_hash, output_lines)
     end
   end
 
-  M.store_fixtures(project_hash, fixtures)
+  M.store_fixtures(project_hash, fixtures_by_test, all_fixtures)
 end
 
 --- Kick off a `Job` to refresh the pytest fixture cache for this project
@@ -262,7 +274,7 @@ end
 function M.parse_fixtures_for_test(test_file_name, test_name)
   local _, project_hash = M.get_current_project_and_hash()
   local project_fixture_file_path = M.get_storage_path_for_project(project_hash)
-  local fixtures = M.get_fixtures(project_fixture_file_path)
+  local fixtures = M.get_fixtures(project_fixture_file_path, "fixtures_by_test")
   local function_fixtures = fixtures[test_file_name][test_name]
   return function_fixtures
 end
@@ -273,6 +285,33 @@ end
 function M.open_file_at_line(file_path, line_number)
   vim.cmd("edit " .. file_path)
   vim.api.nvim_win_set_cursor(0, { line_number, 0 })
+end
+
+function M.all_fixtures()
+  local _, project_hash = M.get_current_project_and_hash()
+  local project_fixture_file_path = M.get_storage_path_for_project(project_hash)
+  local fixtures = M.get_fixtures(project_fixture_file_path, "all_fixtures")
+
+  local fixture_names = {}
+  for fixture_name, _ in pairs(fixtures) do
+    table.insert(fixture_names, fixture_name)
+  end
+
+  vim.ui.select(fixture_names, {
+    prompt = string.format("Go to fixture: "),
+    format_item = function(item)
+      return item
+    end,
+  }, function(fixture)
+    if fixture == nil then
+      return
+    end
+
+    local fixture_info = fixtures[fixture]
+    local fixture_line_number = tonumber(fixture_info.line_number) or 0
+    -- TODO: should add to tagstack (and make this configurable)
+    M.open_file_at_line(fixture_info.file_path, fixture_line_number)
+  end)
 end
 
 --- Find fixtures associated with test under cursor and prompt to go to them
@@ -340,6 +379,12 @@ function M.setup(opts)
         local cache = M.get_storage_path_for_project(project_hash)
         print("Project cache location: ", cache)
       end, {})
+      vim.api.nvim_create_user_command("PytestFixturesTestFixtures", function()
+        M.goto_fixture()
+      end, {})
+      vim.api.nvim_create_user_command("PytestFixturesProjectFixtures", function()
+        M.all_fixtures()
+      end, {})
     end,
   })
 
@@ -351,9 +396,12 @@ function M.setup(opts)
     end,
   })
 
-  vim.keymap.set("n", "<localleader>]", function()
-    M.goto_fixture()
-  end, { desc = "PytestFixtures Go To Fixture" })
+  vim.keymap.set(
+    "n",
+    "<localleader>]",
+    "<cmd>PytestFixturesTestFixtures<cr>",
+    { desc = "PytestFixtures Go To Fixture" }
+  )
 end
 
 return M
