@@ -3,6 +3,8 @@ local Path = require("plenary.path")
 local Job = require("plenary.job")
 local TSUtils = require("nvim-treesitter.ts_utils")
 
+M.debug = false
+
 --- Get project root for a given file based on configured project_markers
 ---@param file string filename for which to find root directory
 ---@return string? root directory for `file`
@@ -234,7 +236,9 @@ function M.has_pytest()
   if vim.fn.executable("pytest") == 1 then
     return true
   else
-    print("Could not find pytest executable..")
+    if M.debug then
+      print("Could not find pytest executable..")
+    end
     return false
   end
 end
@@ -243,9 +247,7 @@ end
 ---@param project_hash string unique hash for project
 ---@return boolean
 function M.should_refresh_fixtures(project_hash)
-  _ = project_hash
-  -- TODO: need to add a delay here
-  return false
+  return true
 end
 
 --- Generate a unique hash for the project, based on `project_root`
@@ -323,7 +325,9 @@ function M.goto_fixture()
 
   local function_fixtures = M.parse_fixtures_for_test(test_file_name, test_name)
   if function_fixtures == nil then
-    print("No fixtures found!")
+    if M.debug then
+      print("No fixtures found!")
+    end
     return
   end
   local fixtures = {}
@@ -350,13 +354,23 @@ end
 
 function M.maybe_refresh_pytest_fixture_cache(buf_file, opts)
   opts = opts or {}
+  local refresh = false
+  for match in string.gmatch(buf_file, "./*/test_.*.py") do
+    refresh = true
+  end
+  if not refresh then
+    return
+  end
+
   local force = opts.force or false
   local project_root, project_hash = M.get_current_project_and_hash(buf_file)
 
   if
     M.has_pytest() and force or (project_root and M.is_python(buf_file) and M.should_refresh_fixtures(project_hash))
   then
-    print("pytest_nvim refreshing cache for " .. vim.fn.expand("%:p"))
+    if M.debug then
+      print("pytest_nvim refreshing cache for " .. vim.fn.expand("%:p"))
+    end
     M.refresh_pytest_fixture_cache(project_hash)
   end
 end
