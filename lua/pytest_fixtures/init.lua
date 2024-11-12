@@ -388,17 +388,34 @@ function M.setup(opts)
       vim.api.nvim_create_user_command("PytestFixturesRefresh", function()
         M.maybe_refresh_pytest_fixture_cache(vim.fn.expand("%"), { force = true })
       end, {})
+
       vim.api.nvim_create_user_command("PytestFixturesProjectCachePath", function()
         local _, project_hash = M.get_current_project_and_hash()
         local cache = M.get_storage_path_for_project(project_hash)
         print("Project cache location: ", cache)
       end, {})
+
       vim.api.nvim_create_user_command("PytestFixturesTestFixtures", function()
         M.goto_fixture()
       end, {})
+
       vim.api.nvim_create_user_command("PytestFixturesProjectFixtures", function()
         M.all_fixtures()
       end, {})
+
+      vim.keymap.set(
+        "n",
+        "<localleader>]",
+        "<cmd>PytestFixturesTestFixtures<cr>",
+        { buffer = true, desc = "PytestFixtures Go To Fixture" }
+      )
+
+      vim.keymap.set(
+        "n",
+        "<localleader>}",
+        "<cmd>PytestFixturesProjectFixtures<cr>",
+        { buffer = true, desc = "PytestFixtures Go To Project Fixture" }
+      )
     end,
   })
 
@@ -409,13 +426,6 @@ function M.setup(opts)
       M.maybe_refresh_pytest_fixture_cache(ev.file)
     end,
   })
-
-  vim.keymap.set(
-    "n",
-    "<localleader>]",
-    "<cmd>PytestFixturesTestFixtures<cr>",
-    { desc = "PytestFixtures Go To Fixture" }
-  )
 end
 
 return M
