@@ -120,7 +120,7 @@ function M.get_relative_path(base_dir, target_path)
 end
 
 --- Get details about the test under cursor
----@return string?, string?, string?[] relative file name, function name, function args
+---@return string?, string?, table? relative file name, function name, function args
 function M.get_current_test_info()
   local function_name = M.get_parent_test_function()
   if function_name == nil then
@@ -173,15 +173,54 @@ function M.parse_and_store_project_fixtures(project_hash, output_lines)
     end,
   })
 
-  local all_fixtures = {}
+  local fixtures = setmetatable({}, {
+    __index = function(tbl, key)
+      tbl[key] = {}
+      return tbl[key]
+    end,
+  })
+
+  function fixtures:add_test(args)
+    local t = { file_path = args.file_path, line_number = args.line_number }
+    self["test_fixtures"][args.current_test_file_path][args.current_test_name][args.fixture_name] = t
+  end
+
+  function fixtures:add_fixture(args)
+    local related_test = args["related_test"] or {}
+    local fixture_obj = self:get_all_fixtures()[args.fixture] or {}
+    local related_tests = fixture_obj["related_tests"] or {}
+    if related_test then
+      local exists = false
+      for _, test in ipairs(related_tests) do
+        if test.name == related_test.name and test.path == related_test.path and test.line == related_test.line then
+          exists = true
+          break
+        end
+      end
+      if not exists then
+        table.insert(related_tests, related_test)
+      end
+    end
+
+    self["all_fixtures"][args.fixture] = {
+      file_path = args.file_path,
+      line_number = args.line_number,
+      related_tests = related_tests,
+    }
+  end
+
+  function fixtures:get_all_fixtures()
+    return self["all_fixtures"]
+  end
 
   local current_test_name = nil
   local current_test_file_path = nil
+  local current_test_line_num = nil
   local last_line_was_test_heading = false
 
   for _, line in ipairs(output_lines) do
     if last_line_was_test_heading then
-      current_test_file_path = line:match("%((.-):")
+      current_test_file_path, current_test_line_num = line:match("%((.-):(.+)%)")
       assert(current_test_name, "current test name is nil")
       fixtures_by_test[current_test_file_path][current_test_name] = {}
       last_line_was_test_heading = false
@@ -198,16 +237,23 @@ function M.parse_and_store_project_fixtures(project_hash, output_lines)
             file_path = file_path,
             line_number = line_number,
           }
-          all_fixtures[string.format("%s:%s", file_path, fixture_name)] = {
+
+          fixtures:add_fixture({
+            fixture = string.format("%s:%s", file_path, fixture_name),
             file_path = file_path,
             line_number = line_number,
-          }
+            related_test = {
+              name = current_test_name,
+              path = current_test_file_path,
+              line = current_test_line_num,
+            },
+          })
         end
       end
     end
   end
 
-  M.store_fixtures(project_hash, fixtures_by_test, all_fixtures)
+  M.store_fixtures(project_hash, fixtures_by_test, fixtures:get_all_fixtures())
 end
 
 --- Kick off a `Job` to refresh the pytest fixture cache for this project
@@ -352,6 +398,50 @@ function M.goto_fixture()
   end)
 end
 
+--- Reverse lookup a fixture to see which tests use it
+function M.reverse_lookup()
+  local _, project_hash = M.get_current_project_and_hash()
+  local project_fixture_file_path = M.get_storage_path_for_project(project_hash)
+  local fixtures = M.get_fixtures(project_fixture_file_path, "all_fixtures")
+  local fixture_names = {}
+  for fixture, _ in pairs(fixtures) do
+    table.insert(fixture_names, fixture)
+  end
+
+  -- TODO: make this generic with a callback or something
+  -- so we don't dupe code here, in `all_fixtures`, and in `goto_fixture`
+  vim.ui.select(fixture_names, {
+    prompt = "Select a fixture: ",
+    format_item = function(item)
+      return item
+    end,
+  }, function(fixture)
+    if fixture == nil then
+      return
+    end
+    local related_tests = fixtures[fixture]["related_tests"]
+    if related_tests == nil then
+      print("No related tests found for this fixture")
+      return
+    end
+
+    return vim.ui.select(related_tests, {
+      prompt = string.format("Fixture %s tests: ", fixture),
+      format_item = function(item)
+        return string.format("%s:%s", item.path, item.name)
+      end,
+    }, function(test)
+      if test == nil or test.path == nil or test.line == nil then
+        print("Invalid test selection...")
+        return
+      end
+
+      local test_line_number = tonumber(test.line) or 0
+      M.open_file_at_line(test.path, test_line_number)
+    end)
+  end)
+end
+
 function M.maybe_refresh_pytest_fixture_cache(buf_file, opts)
   opts = opts or {}
   local refresh = false
@@ -366,7 +456,7 @@ function M.maybe_refresh_pytest_fixture_cache(buf_file, opts)
   local project_root, project_hash = M.get_current_project_and_hash(buf_file)
 
   if
-    M.has_pytest() and force or (project_root and M.is_python(buf_file) and M.should_refresh_fixtures(project_hash))
+    M.has_pytest() and (force or (project_root and M.is_python(buf_file) and M.should_refresh_fixtures(project_hash)))
   then
     if M.debug then
       print("pytest_nvim refreshing cache for " .. vim.fn.expand("%:p"))
@@ -401,6 +491,10 @@ function M.setup(opts)
 
       vim.api.nvim_create_user_command("PytestFixturesProjectFixtures", function()
         M.all_fixtures()
+      end, {})
+
+      vim.api.nvim_create_user_command("PytestFixturesReverseLookup", function()
+        M.reverse_lookup()
       end, {})
 
       vim.keymap.set(
