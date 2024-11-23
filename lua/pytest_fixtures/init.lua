@@ -1,6 +1,5 @@
 local M = {}
 local Path = require("plenary.path")
-local Job = require("plenary.job")
 local TSUtils = require("nvim-treesitter.ts_utils")
 
 M.debug = false
