@@ -19,7 +19,6 @@ function PytestFixturesConfig.setup(opts)
   config = vim.tbl_extend("force", defaults, opts)
 
   if config.create_user_commands then
-    print("creating user commands")
     require("pytest_fixtures.commands").setup(config)
   end
 

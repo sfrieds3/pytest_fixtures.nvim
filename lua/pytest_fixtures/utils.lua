@@ -14,8 +14,6 @@ end
 
 --- Ensure configured data path exists
 function PytestFixturesUtils.ensure_data_path_exists()
-  print("ensuring data path exists")
-  print("data path: ", require("pytest_fixtures.config").data_path)
   if PytestFixturesUtils.data_path_exists then
     return
   end

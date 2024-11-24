@@ -23,7 +23,7 @@ Currently, there is minimal to no configuration options available. But that will
 
 ## Planned Features
 
-- [ ] More configuration options
-- [ ] Better autocmd configuration to keep the cache updated real-time
-- [ ] Go-to any fixture in the project, not just those under cursor
-- [ ] Reverse search; i.e. see which tests use the fixture under cursor
+- [x] More configuration options
+- [x] Better autocmd configuration to keep the cache updated real-time
+- [x] Go-to any fixture in the project, not just those under cursor
+- [x] Reverse search; i.e. see which tests use the fixture under cursor

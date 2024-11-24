@@ -37,7 +37,7 @@ function PytestFxituresApi.goto_fixture()
 
   local function_fixtures = Utils.parse_fixtures_for_test(test_file_name, test_name)
   if function_fixtures == nil then
-    if require("pytest_fuxtures.config").debug then
+    if require("pytest_fixtures.config").debug then
       print("No fixtures found!")
     end
     return
