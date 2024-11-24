@@ -4,6 +4,7 @@ local TSUtils = require("nvim-treesitter.ts_utils")
 local PytestFixturesUtils = {}
 
 PytestFixturesUtils.data_path_exists = false
+PytestFixturesUtils.refreshing = false
 
 --- Get project root for a given file based on configured project_markers
 ---@param file string filename for which to find root directory
@@ -336,6 +337,11 @@ function PytestFixturesUtils.open_file_at_line(file_path, line_number)
 end
 
 function PytestFixturesUtils.maybe_refresh_pytest_fixture_cache(buf_file, opts)
+  if PytestFixturesUtils.refreshing then
+    return
+  end
+  PytestFixturesUtils.refreshing = true
+
   opts = opts or {}
   PytestFixturesUtils.ensure_data_path_exists()
   local refresh = false
@@ -365,6 +371,7 @@ function PytestFixturesUtils.maybe_refresh_pytest_fixture_cache(buf_file, opts)
     end
     PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash)
   end
+  PytestFixturesUtils.refreshing = false
 end
 
 return PytestFixturesUtils
