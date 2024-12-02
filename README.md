@@ -37,8 +37,6 @@ Additionally, the plugin allows you to list all project fixtures, and either go 
 
 - `PytestFixturesRefresh`: Refresh fixture cache, you should not need to run this if you have configured autocmd setup
 
-## Default configuration
-
 ## Configuration
 
 <details>
