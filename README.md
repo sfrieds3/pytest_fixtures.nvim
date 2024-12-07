@@ -2,6 +2,10 @@
 
 Easily jump to pytest fixtures. Supports jumping to a fixture used by the test under cursor, jumping to any test defined in the current project, or reverse lookup -- i.e. jump to a test which uses a fixture.
 
+![goto_test_fixture](https://github.com/sfrieds3/pytest_fixtures.nvim/blob/d939927db1305bed907678fa72a5afc5e4ace7f0/goto_test_fixture.png)
+
+![reverse search](https://github.com/sfrieds3/pytest_fixtures.nvim/blob/d939927db1305bed907678fa72a5afc5e4ace7f0/reverse_search.png)
+
 ## Installation
 
 lazy.nvim:
