@@ -92,7 +92,7 @@ function PytestFxituresApi.reverse_lookup()
     end
 
     return vim.ui.select(related_tests, {
-      prompt = string.format("Fixture %s tests: ", fixture),
+      prompt = string.format("Tests using fixture %s: ", fixture),
       format_item = function(item)
         return string.format("%s:%s", item.path, item.name)
       end,
