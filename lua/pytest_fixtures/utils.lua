@@ -332,7 +332,7 @@ end
 ---@param file_path string file path to open
 ---@param line_number integer line number to jump to
 function PytestFixturesUtils.open_file_at_line(file_path, line_number)
-  vim.cmd("edit " .. file_path)
+  vim.cmd.edit({ args = { file_path }, bang = true })
   vim.api.nvim_win_set_cursor(0, { line_number, 0 })
 end
 
