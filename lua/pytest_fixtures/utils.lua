@@ -374,4 +374,23 @@ function PytestFixturesUtils.maybe_refresh_pytest_fixture_cache(buf_file, opts)
   PytestFixturesUtils.refreshing = false
 end
 
+function PytestFixturesUtils.ui_select(opts)
+  local items = opts.items
+  local prompt = opts.prompt
+  local callback = opts.callback
+  local context = opts.context or nil
+  local format_func = opts.format_func or function(item)
+    return item
+  end
+
+  vim.ui.select(items, {
+    prompt = prompt,
+    format_item = function(item)
+      return format_func(item)
+    end,
+  }, function(item)
+    callback(item, context)
+  end)
+end
+
 return PytestFixturesUtils

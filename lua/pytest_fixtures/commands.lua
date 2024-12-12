@@ -36,6 +36,10 @@ function PytestFixturesCommands.setup(opts)
       vim.api.nvim_create_user_command("PytestFixturesReverseLookup", function()
         Api.reverse_lookup()
       end, {})
+
+      vim.api.nvim_create_user_command("PytestFixturesReverseLookupCurrentFixture", function()
+        Api.reverse_lookup({ current = true })
+      end, {})
     end,
   })
 end
