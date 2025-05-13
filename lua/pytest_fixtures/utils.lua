@@ -1,5 +1,5 @@
-local Path = require("plenary.path")
-local TSUtils = require("nvim-treesitter.ts_utils")
+local Path
+local TSUtils
 
 local PytestFixturesUtils = {}
 
@@ -19,6 +19,7 @@ function PytestFixturesUtils.ensure_data_path_exists()
     return
   end
 
+  Path = require("plenary.path")
   local path = Path:new(require("pytest_fixtures.config").data_path)
   if not path:exists() then
     path:mkdir()
@@ -30,6 +31,7 @@ end
 ---@param project_hash string unique hash for project
 ---@return Path path object to store project data
 function PytestFixturesUtils.get_storage_path_for_project(project_hash)
+  Path = require("plenary.path")
   local full_path = string.format("%s/%s.json", require("pytest_fixtures.config").data_path, project_hash)
   return Path:new(full_path)
 end
@@ -72,6 +74,7 @@ end
 ---@param fixture_key string fixture key to return (e.g. `fixtures_by_test`, `all_fixtures`)
 ---@return table fixtures
 function PytestFixturesUtils.get_fixtures(file_path, fixture_key)
+  Path = require("plenary.path")
   local path = Path:new(file_path)
   local raw_fixtures = path:read()
 
@@ -88,6 +91,7 @@ PytestFixturesUtils.ts_query_text = [[
 --- Get the parent test function for the node under cursor
 ---@return string? function name
 function PytestFixturesUtils.get_parent_test_function()
+  TSUtils = require("nvim-treesitter.ts_utils")
   local node_at_cursor = TSUtils.get_node_at_cursor()
 
   while node_at_cursor do

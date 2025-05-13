@@ -1,4 +1,3 @@
-local utils = require("pytest_fixtures.utils")
 local PytestFixturesConfig = {}
 local config = {}
 
