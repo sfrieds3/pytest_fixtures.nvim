@@ -25,9 +25,9 @@ lazy.nvim:
 
 ## Usage
 
-First, ensure you are in an environment with `pytest` installed. Then, when your cursor is on a test, hit `<localleader>]` (default mapping, see [configuration](#configuration) section below to override the default mapping) to bring up a floating window with a list of fixtures used by the current test. Selecting any one will bring you to the soruce for that test. Simple as that.
+First, ensure you are in an environment with `pytest` installed and available on Neovim's inherited `PATH`. Fixture discovery runs from the detected project root. Automatic refresh recognizes `test_*.py` and `*_test.py`; failed discovery preserves the previous cache. Then, when your cursor is on a test, hit `<localleader>]` (default mapping, see [configuration](#configuration) section below to override the default mapping) to bring up a floating window with a list of fixtures used by the current test. Selecting any one will bring you to the source for that test. Simple as that.
 
-Additionally, the plugin allows you to list all project fixtures, and either go to the fixture or list and go to a test using that fixture. See the [user commands](#user-commands) secion for more details.
+Additionally, the plugin allows you to list all project fixtures, and either go to the fixture or list and go to a test using that fixture. See the [user commands](#user-commands) section for more details.
 
 ### User Commands
 
@@ -69,3 +69,11 @@ Additionally, the plugin allows you to list all project fixtures, and either go 
 <!-- config:end -->
 
 </details>
+
+## Development
+
+Run the refresh regression checks with Neovim:
+
+```sh
+nvim --headless -u NONE -l tests/refresh.lua
+```

@@ -261,14 +261,29 @@ function PytestFixturesUtils.parse_and_store_project_fixtures(project_hash, outp
   PytestFixturesUtils.store_fixtures(project_hash, fixtures_by_test, fixtures:get_all_fixtures())
 end
 
---- Kick off a `Job` to refresh the pytest fixture cache for this project
+--- Refresh project fixtures asynchronously using pytest from inherited PATH
 ---@param project_hash string unique hash for project, used as filename for cache
-function PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash)
+---@param project_root string working directory for pytest discovery
+function PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash, project_root)
   local function on_exit(out)
-    local output_lines = vim.split(out.stdout, "\n", { trimempty = true })
-    PytestFixturesUtils.parse_and_store_project_fixtures(project_hash, output_lines)
+    vim.schedule(function()
+      PytestFixturesUtils.refreshing = false
+      if out.code ~= 0 then
+        vim.notify("pytest fixture refresh failed: " .. (out.stderr or ""), vim.log.levels.WARN)
+        return
+      end
+      local output_lines = vim.split(out.stdout, "\n", { trimempty = true })
+      local parsed, parse_err = pcall(PytestFixturesUtils.parse_and_store_project_fixtures, project_hash, output_lines)
+      if not parsed then
+        vim.notify("Could not parse pytest fixtures: " .. tostring(parse_err), vim.log.levels.WARN)
+      end
+    end)
   end
-  local result = vim.system({ "pytest", "--fixtures-per-test" }, { text = true }, on_exit)
+  local ok, err = pcall(vim.system, { "pytest", "--fixtures-per-test" }, { text = true, cwd = project_root }, on_exit)
+  if not ok then
+    PytestFixturesUtils.refreshing = false
+    vim.notify("Could not start pytest: " .. tostring(err), vim.log.levels.WARN)
+  end
 end
 
 --- Determine if the a given filename is of python ft
@@ -344,38 +359,26 @@ function PytestFixturesUtils.maybe_refresh_pytest_fixture_cache(buf_file, opts)
   if PytestFixturesUtils.refreshing then
     return
   end
-  PytestFixturesUtils.refreshing = true
 
   opts = opts or {}
-  PytestFixturesUtils.ensure_data_path_exists()
-  local refresh = false
-  for _ in string.gmatch(buf_file, "./*/test_.*.py") do
-    refresh = true
-  end
-  if not refresh then
+  local force = opts.force or false
+  local basename = vim.fn.fnamemodify(buf_file, ":t")
+  if not force and not (basename:match("^test_.*%.py$") or basename:match("_test%.py$")) then
     return
   end
 
-  local force = opts.force or false
-  local project_root, project_hash = PytestFixturesUtils.get_current_project_and_hash(buf_file)
-
-  if
-    PytestFixturesUtils.has_pytest()
-    and (
-      force
-      or (
-        project_root
-        and PytestFixturesUtils.is_python(buf_file)
-        and PytestFixturesUtils.should_refresh_fixtures(project_hash)
-      )
-    )
-  then
-    if PytestFixturesUtils.debug then
-      print("pytest_nvim refreshing cache for " .. vim.fn.expand("%:p"))
-    end
-    PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash)
+  local project_root = PytestFixturesUtils.get_project_root(buf_file)
+  if not project_root or not PytestFixturesUtils.has_pytest() then
+    return
   end
-  PytestFixturesUtils.refreshing = false
+  local project_hash = PytestFixturesUtils.generate_project_hash(project_root)
+  if not force and not PytestFixturesUtils.should_refresh_fixtures(project_hash) then
+    return
+  end
+
+  PytestFixturesUtils.ensure_data_path_exists()
+  PytestFixturesUtils.refreshing = true
+  PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash, project_root)
 end
 
 function PytestFixturesUtils.ui_select(opts)
