@@ -1,5 +1,4 @@
 local Path
-local TSUtils
 
 local PytestFixturesUtils = {}
 
@@ -82,32 +81,38 @@ function PytestFixturesUtils.get_fixtures(file_path, fixture_key)
   return fixtures[fixture_key]
 end
 
-PytestFixturesUtils.ts_query_text = [[
-(function_definition
-  name: (identifier) @function
-  #match? @function "test_")
-  ]]
+--- Get the nearest enclosing Python test using Neovim's native Tree-sitter API.
+---@return TSNode? node, string? name
+local function get_parent_test()
+  local ok, parser = pcall(vim.treesitter.get_parser, 0, "python")
+  if not ok or not parser then
+    return nil
+  end
+  local parsed, trees = pcall(parser.parse, parser)
+  if not parsed or not trees or not trees[1] then
+    return nil
+  end
+  local found, node = pcall(vim.treesitter.get_node, { bufnr = 0, lang = "python" })
+  if not found then
+    return nil
+  end
+  while node do
+    if node:type() == "function_definition" then
+      local name_node = node:field("name")[1]
+      local name = name_node and vim.treesitter.get_node_text(name_node, 0)
+      if name and name:match("^test_") then
+        return node, name
+      end
+    end
+    node = node:parent()
+  end
+end
 
 --- Get the parent test function for the node under cursor
 ---@return string? function name
 function PytestFixturesUtils.get_parent_test_function()
-  TSUtils = require("nvim-treesitter.ts_utils")
-  local node_at_cursor = TSUtils.get_node_at_cursor()
-
-  while node_at_cursor do
-    if node_at_cursor:type() == "function_definition" then
-      local function_name_node = node_at_cursor:field("name")[1]
-      if function_name_node then
-        local function_name = vim.treesitter.get_node_text(function_name_node, 0)
-        if function_name:match("^test_") then
-          return function_name
-        end
-      end
-    end
-    node_at_cursor = node_at_cursor:parent()
-  end
-
-  return nil
+  local _, name = get_parent_test()
+  return name
 end
 
 --- Convert `target_path` absolute path to a path relative to `base_dir`
@@ -127,7 +132,7 @@ end
 --- Get details about the test under cursor
 ---@return string?, string?, table? relative file name, function name, function args
 function PytestFixturesUtils.get_current_test_info()
-  local function_name = PytestFixturesUtils.get_parent_test_function()
+  local function_node, function_name = get_parent_test()
   if function_name == nil then
     print("No test function found under cursor")
     return nil, nil, nil
@@ -140,27 +145,25 @@ function PytestFixturesUtils.get_current_test_info()
   end
   local relative_file_name = PytestFixturesUtils.get_relative_path(project_root, test_file)
 
-  -- Query the arguments of the function
-  local query_string = [[
-    (function_definition
-      name: (identifier) @name
-      parameters: (parameters (identifier) @args))
-  ]]
-
-  local lang = "python"
-  local parser = vim.treesitter.get_parser(0, lang)
-  assert(parser, "parser should not be nil")
-
-  local query = vim.treesitter.query.parse(lang, query_string)
-  local root_node = parser:parse()[1]
-
+  -- Read only this function's parameters, avoiding matches in same-named tests.
   local function_args = {}
-  for _, match, _ in query:iter_matches(root_node:root(), 0, 0, -1, { all = true }) do
-    local name = vim.treesitter.get_node_text(match[1][1], 0)
-
-    if name == function_name then
-      local arg = vim.treesitter.get_node_text(match[2][1], 0)
-      table.insert(function_args, arg)
+  local parameters = function_node:field("parameters")[1]
+  if parameters then
+    for parameter in parameters:iter_children() do
+      local name_node
+      if parameter:type() == "identifier" then
+        name_node = parameter
+      elseif parameter:type() == "typed_parameter" then
+        local first = parameter:named_child(0)
+        if first and first:type() == "identifier" then
+          name_node = first
+        end
+      elseif parameter:type() == "default_parameter" or parameter:type() == "typed_default_parameter" then
+        name_node = parameter:field("name")[1]
+      end
+      if name_node then
+        table.insert(function_args, vim.treesitter.get_node_text(name_node, 0))
+      end
     end
   end
 
