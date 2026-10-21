@@ -6,6 +6,14 @@ Easily jump to pytest fixtures. Supports jumping to a fixture used by the test u
 
 ![reverse search](https://github.com/sfrieds3/pytest_fixtures.nvim/blob/d939927db1305bed907678fa72a5afc5e4ace7f0/reverse_search.png)
 
+## Requirements
+
+- Neovim 0.10 or newer.
+- A Python Tree-sitter parser on Neovim's runtime path for test-under-cursor navigation. You can install it with a parser manager such as nvim-treesitter; the plugin uses Neovim's native Tree-sitter API and does not require nvim-treesitter itself.
+- `pytest` on PATH in the project environment.
+
+If the parser or syntax tree is unavailable, test-under-cursor navigation returns without an error. Project-wide fixture navigation remains available.
+
 ## Installation
 
 lazy.nvim:
@@ -85,3 +93,9 @@ an empty picker. Run `:PytestFixturesRefresh` in the project environment to rebu
 the cache. Tests absent from the cache are treated as having no cached fixtures.
 
 Cache regression checks can be run with `nvim --headless -u NONE -l tests/cache.lua`.
+
+Run the native Tree-sitter regression checks with a Python parser installed:
+
+```sh
+nvim --headless -u NONE -i NONE -l tests/treesitter.lua
+```
