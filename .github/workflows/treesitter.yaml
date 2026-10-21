@@ -1,0 +1,27 @@
+name: Tree-sitter regression
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+jobs:
+  treesitter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          version: v0.10.4
+          neovim: true
+      - uses: actions/checkout@v4
+        with:
+          repository: tree-sitter/tree-sitter-python
+          ref: v0.23.6
+          path: .test-python-parser
+      - name: Build Python parser
+        run: |
+          mkdir -p .test-runtime/parser
+          cc -O2 -shared -fPIC -I .test-python-parser/src \
+            .test-python-parser/src/parser.c .test-python-parser/src/scanner.c \
+            -o .test-runtime/parser/python.so
+      - name: Test native Tree-sitter navigation
+        run: nvim --headless -u NONE -i NONE --cmd 'set runtimepath+=.test-runtime' -l tests/treesitter.lua
