@@ -69,3 +69,11 @@ Additionally, the plugin allows you to list all project fixtures, and either go 
 <!-- config:end -->
 
 </details>
+
+### Fixture cache recovery
+
+Navigation commands report missing, invalid, or empty fixture caches without opening
+an empty picker. Run `:PytestFixturesRefresh` in the project environment to rebuild
+the cache. Tests absent from the cache are treated as having no cached fixtures.
+
+Cache regression checks can be run with `nvim --headless -u NONE -l tests/cache.lua`.
