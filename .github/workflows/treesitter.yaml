@@ -1,8 +1,6 @@
 name: Tree-sitter regression
 on:
-  pull_request:
-  push:
-    branches: [main, master]
+  workflow_call:
 jobs:
   treesitter:
     runs-on: ubuntu-latest
