@@ -2,7 +2,9 @@ name: Build
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main]
+permissions:
+  contents: read
 jobs:
   stylua:
     name: Stylua
@@ -24,3 +26,29 @@ jobs:
           version: stable
           neovim: true
       - run: nvim --headless -u NONE -l tests/refresh.lua
+
+
+  release-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -p 'test_tag_version.py'
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [stylua, release-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: version-tags
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Tag validated main commit
+        env:
+          VALIDATED_COMMIT: ${{ github.sha }}
+        run: python3 scripts/tag_version.py "$VALIDATED_COMMIT"

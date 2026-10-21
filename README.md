@@ -14,6 +14,15 @@ Easily jump to pytest fixtures. Supports jumping to a fixture used by the test u
 
 If the parser or syntax tree is unavailable, test-under-cursor navigation returns without an error. Project-wide fixture navigation remains available.
 
+## Releases
+
+Successful pushes to `main` automatically create version tags after CI passes.
+The first tag is `v0.1.0`; later releases increment the patch component of the
+highest stable `vMAJOR.MINOR.PATCH` tag. Maintainers can create a major or minor
+tag manually to start a new release line. Prerelease tags are ignored.
+Rerunning CI for an already tagged commit does not create another tag, and
+superseded main commits are skipped. Pull requests never create tags.
+
 ## Installation
 
 lazy.nvim:
