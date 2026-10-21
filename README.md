@@ -6,6 +6,15 @@ Easily jump to pytest fixtures. Supports jumping to a fixture used by the test u
 
 ![reverse search](https://github.com/sfrieds3/pytest_fixtures.nvim/blob/d939927db1305bed907678fa72a5afc5e4ace7f0/reverse_search.png)
 
+## Releases
+
+Successful pushes to `main` automatically create version tags after CI passes.
+The first tag is `v0.1.0`; later releases increment the patch component of the
+highest stable `vMAJOR.MINOR.PATCH` tag. Maintainers can create a major or minor
+tag manually to start a new release line. Prerelease tags are ignored.
+Rerunning CI for an already tagged commit does not create another tag, and
+superseded main commits are skipped. Pull requests never create tags.
+
 ## Installation
 
 lazy.nvim:
