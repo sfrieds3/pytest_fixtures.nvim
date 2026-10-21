@@ -73,13 +73,81 @@ end
 ---@param file_path Path path to project fixture cache file
 ---@param fixture_key string fixture key to return (e.g. `fixtures_by_test`, `all_fixtures`)
 ---@return table fixtures
+---@return string? reason cache unavailable or invalid
 function PytestFixturesUtils.get_fixtures(file_path, fixture_key)
   Path = require("plenary.path")
-  local path = Path:new(file_path)
-  local raw_fixtures = path:read()
+  local ok, raw = pcall(function()
+    return Path:new(file_path):read()
+  end)
+  if not ok or type(raw) ~= "string" then
+    return {}, "Fixture cache is unavailable. Run :PytestFixturesRefresh."
+  end
+  local decoded, cache = pcall(vim.json.decode, raw)
+  if not decoded or type(cache) ~= "table" or type(cache[fixture_key]) ~= "table" then
+    return {}, "Fixture cache is invalid. Run :PytestFixturesRefresh."
+  end
 
-  local fixtures = vim.json.decode(raw_fixtures)
-  return fixtures[fixture_key]
+  local function valid_line(line)
+    local number = tonumber(line)
+    return number ~= nil and number >= 1 and number % 1 == 0
+  end
+
+  local function valid_fixtures(fixtures)
+    if type(fixtures) ~= "table" then
+      return false
+    end
+    for name, fixture in pairs(fixtures) do
+      if
+        type(name) ~= "string"
+        or type(fixture) ~= "table"
+        or type(fixture.file_path) ~= "string"
+        or fixture.file_path == ""
+        or not valid_line(fixture.line_number)
+      then
+        return false
+      end
+      if fixture.related_tests ~= nil then
+        if type(fixture.related_tests) ~= "table" then
+          return false
+        end
+        for _, test in pairs(fixture.related_tests) do
+          if
+            type(test) ~= "table"
+            or type(test.path) ~= "string"
+            or test.path == ""
+            or type(test.name) ~= "string"
+            or not valid_line(test.line)
+          then
+            return false
+          end
+        end
+      end
+    end
+    return true
+  end
+
+  local fixtures = cache[fixture_key]
+  local valid = true
+  if fixture_key == "fixtures_by_test" then
+    for file, tests in pairs(fixtures) do
+      if type(file) ~= "string" or type(tests) ~= "table" then
+        valid = false
+        break
+      end
+      for test, entries in pairs(tests) do
+        if type(test) ~= "string" or not valid_fixtures(entries) then
+          valid = false
+          break
+        end
+      end
+    end
+  else
+    valid = valid_fixtures(fixtures)
+  end
+  if not valid then
+    return {}, "Fixture cache is invalid. Run :PytestFixturesRefresh."
+  end
+  return fixtures
 end
 
 PytestFixturesUtils.ts_query_text = [[
@@ -342,9 +410,12 @@ end
 function PytestFixturesUtils.parse_fixtures_for_test(test_file_name, test_name)
   local _, project_hash = PytestFixturesUtils.get_current_project_and_hash()
   local project_fixture_file_path = PytestFixturesUtils.get_storage_path_for_project(project_hash)
-  local fixtures = PytestFixturesUtils.get_fixtures(project_fixture_file_path, "fixtures_by_test")
-  local function_fixtures = fixtures[test_file_name][test_name]
-  return function_fixtures
+  local fixtures, reason = PytestFixturesUtils.get_fixtures(project_fixture_file_path, "fixtures_by_test")
+  if reason then
+    return {}, reason
+  end
+  local tests = fixtures[test_file_name] or {}
+  return tests[test_name] or {}
 end
 
 --- Open a file at a specified line number

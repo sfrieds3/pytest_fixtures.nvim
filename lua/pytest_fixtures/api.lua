@@ -1,10 +1,21 @@
 local Utils = require("pytest_fixtures.utils")
 local PytestFxituresApi = {}
 
+local function has_fixtures(fixtures, reason)
+  if next(fixtures) == nil then
+    vim.notify(reason or "No cached fixtures found. Run :PytestFixturesRefresh if needed.", vim.log.levels.INFO)
+    return false
+  end
+  return true
+end
+
 function PytestFxituresApi.all_fixtures()
   local _, project_hash = Utils.get_current_project_and_hash()
   local project_fixture_file_path = Utils.get_storage_path_for_project(project_hash)
-  local fixtures = Utils.get_fixtures(project_fixture_file_path, "all_fixtures")
+  local fixtures, reason = Utils.get_fixtures(project_fixture_file_path, "all_fixtures")
+  if not has_fixtures(fixtures, reason) then
+    return
+  end
 
   local fixture_names = {}
   for fixture_name, _ in pairs(fixtures) do
@@ -34,11 +45,8 @@ function PytestFxituresApi.goto_fixture()
     return
   end
 
-  local function_fixtures = Utils.parse_fixtures_for_test(test_file_name, test_name)
-  if function_fixtures == nil then
-    if require("pytest_fixtures.config").debug then
-      print("No fixtures found!")
-    end
+  local function_fixtures, reason = Utils.parse_fixtures_for_test(test_file_name, test_name)
+  if not has_fixtures(function_fixtures, reason) then
     return
   end
   local fixtures = {}
@@ -68,7 +76,10 @@ function PytestFxituresApi.reverse_lookup(opts)
   -- local current_fixture = opts["current"] or false
   local _, project_hash = Utils.get_current_project_and_hash()
   local project_fixture_file_path = Utils.get_storage_path_for_project(project_hash)
-  local fixtures = Utils.get_fixtures(project_fixture_file_path, "all_fixtures")
+  local fixtures, reason = Utils.get_fixtures(project_fixture_file_path, "all_fixtures")
+  if not has_fixtures(fixtures, reason) then
+    return
+  end
   local fixture_names = {}
   for fixture, _ in pairs(fixtures) do
     table.insert(fixture_names, fixture)
