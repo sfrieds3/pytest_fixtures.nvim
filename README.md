@@ -6,6 +6,23 @@ Easily jump to pytest fixtures. Supports jumping to a fixture used by the test u
 
 ![reverse search](https://github.com/sfrieds3/pytest_fixtures.nvim/blob/d939927db1305bed907678fa72a5afc5e4ace7f0/reverse_search.png)
 
+## Requirements
+
+- Neovim 0.10 or newer.
+- A Python Tree-sitter parser on Neovim's runtime path for test-under-cursor navigation. You can install it with a parser manager such as nvim-treesitter; the plugin uses Neovim's native Tree-sitter API and does not require nvim-treesitter itself.
+- `pytest` on PATH in the project environment.
+
+If the parser or syntax tree is unavailable, test-under-cursor navigation returns without an error. Project-wide fixture navigation remains available.
+
+## Releases
+
+Successful pushes to `main` automatically create version tags after CI passes.
+The first tag is `v0.1.0`; later releases increment the patch component of the
+highest stable `vMAJOR.MINOR.PATCH` tag. Maintainers can create a major or minor
+tag manually to start a new release line. Prerelease tags are ignored.
+Rerunning CI for an already tagged commit does not create another tag, and
+superseded main commits are skipped. Pull requests never create tags.
+
 ## Installation
 
 lazy.nvim:
@@ -25,9 +42,9 @@ lazy.nvim:
 
 ## Usage
 
-First, ensure you are in an environment with `pytest` installed. Then, when your cursor is on a test, hit `<localleader>]` (default mapping, see [configuration](#configuration) section below to override the default mapping) to bring up a floating window with a list of fixtures used by the current test. Selecting any one will bring you to the soruce for that test. Simple as that.
+First, ensure you are in an environment with `pytest` installed and available on Neovim's inherited `PATH`. Fixture discovery runs from the detected project root. Automatic refresh recognizes `test_*.py` and `*_test.py`; failed discovery preserves the previous cache. Then, when your cursor is on a test, hit `<localleader>]` (default mapping, see [configuration](#configuration) section below to override the default mapping) to bring up a floating window with a list of fixtures used by the current test. Selecting any one will bring you to the source for that test. Simple as that.
 
-Additionally, the plugin allows you to list all project fixtures, and either go to the fixture or list and go to a test using that fixture. See the [user commands](#user-commands) secion for more details.
+Additionally, the plugin allows you to list all project fixtures, and either go to the fixture or list and go to a test using that fixture. See the [user commands](#user-commands) section for more details.
 
 ### User Commands
 
@@ -69,3 +86,25 @@ Additionally, the plugin allows you to list all project fixtures, and either go 
 <!-- config:end -->
 
 </details>
+
+## Development
+
+Run the refresh regression checks with Neovim:
+
+```sh
+nvim --headless -u NONE -l tests/refresh.lua
+```
+
+### Fixture cache recovery
+
+Navigation commands report missing, invalid, or empty fixture caches without opening
+an empty picker. Run `:PytestFixturesRefresh` in the project environment to rebuild
+the cache. Tests absent from the cache are treated as having no cached fixtures.
+
+Cache regression checks can be run with `nvim --headless -u NONE -l tests/cache.lua`.
+
+Run the native Tree-sitter regression checks with a Python parser installed:
+
+```sh
+nvim --headless -u NONE -i NONE -l tests/treesitter.lua
+```

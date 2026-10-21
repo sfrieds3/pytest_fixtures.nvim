@@ -2,7 +2,9 @@ name: Build
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main]
+permissions:
+  contents: read
 jobs:
   stylua:
     name: Stylua
@@ -14,3 +16,45 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --check .
           version: latest
+  test:
+    name: Refresh regression checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          version: stable
+          neovim: true
+      - run: nvim --headless -u NONE -l tests/refresh.lua
+
+
+  release-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 -m unittest discover -s tests -p 'test_tag_version.py'
+
+  cache:
+    uses: ./.github/workflows/cache.yaml
+
+  treesitter:
+    uses: ./.github/workflows/treesitter.yaml
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [stylua, test, cache, treesitter, release-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: version-tags
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Tag validated main commit
+        env:
+          VALIDATED_COMMIT: ${{ github.sha }}
+        run: python3 scripts/tag_version.py "$VALIDATED_COMMIT"

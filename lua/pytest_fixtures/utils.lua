@@ -1,5 +1,4 @@
 local Path
-local TSUtils
 
 local PytestFixturesUtils = {}
 
@@ -73,41 +72,115 @@ end
 ---@param file_path Path path to project fixture cache file
 ---@param fixture_key string fixture key to return (e.g. `fixtures_by_test`, `all_fixtures`)
 ---@return table fixtures
+---@return string? reason cache unavailable or invalid
 function PytestFixturesUtils.get_fixtures(file_path, fixture_key)
   Path = require("plenary.path")
-  local path = Path:new(file_path)
-  local raw_fixtures = path:read()
+  local ok, raw = pcall(function()
+    return Path:new(file_path):read()
+  end)
+  if not ok or type(raw) ~= "string" then
+    return {}, "Fixture cache is unavailable. Run :PytestFixturesRefresh."
+  end
+  local decoded, cache = pcall(vim.json.decode, raw)
+  if not decoded or type(cache) ~= "table" or type(cache[fixture_key]) ~= "table" then
+    return {}, "Fixture cache is invalid. Run :PytestFixturesRefresh."
+  end
 
-  local fixtures = vim.json.decode(raw_fixtures)
-  return fixtures[fixture_key]
+  local function valid_line(line)
+    local number = tonumber(line)
+    return number ~= nil and number >= 1 and number % 1 == 0
+  end
+
+  local function valid_fixtures(fixtures)
+    if type(fixtures) ~= "table" then
+      return false
+    end
+    for name, fixture in pairs(fixtures) do
+      if
+        type(name) ~= "string"
+        or type(fixture) ~= "table"
+        or type(fixture.file_path) ~= "string"
+        or fixture.file_path == ""
+        or not valid_line(fixture.line_number)
+      then
+        return false
+      end
+      if fixture.related_tests ~= nil then
+        if type(fixture.related_tests) ~= "table" then
+          return false
+        end
+        for _, test in pairs(fixture.related_tests) do
+          if
+            type(test) ~= "table"
+            or type(test.path) ~= "string"
+            or test.path == ""
+            or type(test.name) ~= "string"
+            or not valid_line(test.line)
+          then
+            return false
+          end
+        end
+      end
+    end
+    return true
+  end
+
+  local fixtures = cache[fixture_key]
+  local valid = true
+  if fixture_key == "fixtures_by_test" then
+    for file, tests in pairs(fixtures) do
+      if type(file) ~= "string" or type(tests) ~= "table" then
+        valid = false
+        break
+      end
+      for test, entries in pairs(tests) do
+        if type(test) ~= "string" or not valid_fixtures(entries) then
+          valid = false
+          break
+        end
+      end
+    end
+  else
+    valid = valid_fixtures(fixtures)
+  end
+  if not valid then
+    return {}, "Fixture cache is invalid. Run :PytestFixturesRefresh."
+  end
+  return fixtures
 end
 
-PytestFixturesUtils.ts_query_text = [[
-(function_definition
-  name: (identifier) @function
-  #match? @function "test_")
-  ]]
+--- Get the nearest enclosing Python test using Neovim's native Tree-sitter API.
+---@return TSNode? node, string? name
+local function get_parent_test()
+  local ok, parser = pcall(vim.treesitter.get_parser, 0, "python")
+  if not ok or not parser then
+    return nil
+  end
+  local parsed, trees = pcall(parser.parse, parser)
+  if not parsed or not trees or not trees[1] then
+    return nil
+  end
+  local found, node = pcall(vim.treesitter.get_node, { bufnr = 0, lang = "python" })
+  if not found then
+    return nil
+  end
+  while node do
+    if node:type() == "function_definition" then
+      local name_node = node:field("name")[1]
+      local name = name_node and vim.treesitter.get_node_text(name_node, 0)
+      if name and name:match("^test_") then
+        return node, name
+      end
+    end
+    node = node:parent()
+  end
+end
 
 --- Get the parent test function for the node under cursor
 ---@return string? function name
 function PytestFixturesUtils.get_parent_test_function()
-  TSUtils = require("nvim-treesitter.ts_utils")
-  local node_at_cursor = TSUtils.get_node_at_cursor()
-
-  while node_at_cursor do
-    if node_at_cursor:type() == "function_definition" then
-      local function_name_node = node_at_cursor:field("name")[1]
-      if function_name_node then
-        local function_name = vim.treesitter.get_node_text(function_name_node, 0)
-        if function_name:match("^test_") then
-          return function_name
-        end
-      end
-    end
-    node_at_cursor = node_at_cursor:parent()
-  end
-
-  return nil
+  local _, name = get_parent_test()
+  return name
 end
 
 --- Convert `target_path` absolute path to a path relative to `base_dir`
@@ -127,7 +200,7 @@ end
 --- Get details about the test under cursor
 ---@return string?, string?, table? relative file name, function name, function args
 function PytestFixturesUtils.get_current_test_info()
-  local function_name = PytestFixturesUtils.get_parent_test_function()
+  local function_node, function_name = get_parent_test()
   if function_name == nil then
     print("No test function found under cursor")
     return nil, nil, nil
@@ -140,27 +213,25 @@ function PytestFixturesUtils.get_current_test_info()
   end
   local relative_file_name = PytestFixturesUtils.get_relative_path(project_root, test_file)
 
-  -- Query the arguments of the function
-  local query_string = [[
-    (function_definition
-      name: (identifier) @name
-      parameters: (parameters (identifier) @args))
-  ]]
-
-  local lang = "python"
-  local parser = vim.treesitter.get_parser(0, lang)
-  assert(parser, "parser should not be nil")
-
-  local query = vim.treesitter.query.parse(lang, query_string)
-  local root_node = parser:parse()[1]
-
+  -- Read only this function's parameters, avoiding matches in same-named tests.
   local function_args = {}
-  for _, match, _ in query:iter_matches(root_node:root(), 0, 0, -1, { all = true }) do
-    local name = vim.treesitter.get_node_text(match[1][1], 0)
-
-    if name == function_name then
-      local arg = vim.treesitter.get_node_text(match[2][1], 0)
-      table.insert(function_args, arg)
+  local parameters = function_node:field("parameters")[1]
+  if parameters then
+    for parameter in parameters:iter_children() do
+      local name_node
+      if parameter:type() == "identifier" then
+        name_node = parameter
+      elseif parameter:type() == "typed_parameter" then
+        local first = parameter:named_child(0)
+        if first and first:type() == "identifier" then
+          name_node = first
+        end
+      elseif parameter:type() == "default_parameter" or parameter:type() == "typed_default_parameter" then
+        name_node = parameter:field("name")[1]
+      end
+      if name_node then
+        table.insert(function_args, vim.treesitter.get_node_text(name_node, 0))
+      end
     end
   end
 
@@ -261,14 +332,29 @@ function PytestFixturesUtils.parse_and_store_project_fixtures(project_hash, outp
   PytestFixturesUtils.store_fixtures(project_hash, fixtures_by_test, fixtures:get_all_fixtures())
 end
 
---- Kick off a `Job` to refresh the pytest fixture cache for this project
+--- Refresh project fixtures asynchronously using pytest from inherited PATH
 ---@param project_hash string unique hash for project, used as filename for cache
-function PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash)
+---@param project_root string working directory for pytest discovery
+function PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash, project_root)
   local function on_exit(out)
-    local output_lines = vim.split(out.stdout, "\n", { trimempty = true })
-    PytestFixturesUtils.parse_and_store_project_fixtures(project_hash, output_lines)
+    vim.schedule(function()
+      PytestFixturesUtils.refreshing = false
+      if out.code ~= 0 then
+        vim.notify("pytest fixture refresh failed: " .. (out.stderr or ""), vim.log.levels.WARN)
+        return
+      end
+      local output_lines = vim.split(out.stdout, "\n", { trimempty = true })
+      local parsed, parse_err = pcall(PytestFixturesUtils.parse_and_store_project_fixtures, project_hash, output_lines)
+      if not parsed then
+        vim.notify("Could not parse pytest fixtures: " .. tostring(parse_err), vim.log.levels.WARN)
+      end
+    end)
   end
-  local result = vim.system({ "pytest", "--fixtures-per-test" }, { text = true }, on_exit)
+  local ok, err = pcall(vim.system, { "pytest", "--fixtures-per-test" }, { text = true, cwd = project_root }, on_exit)
+  if not ok then
+    PytestFixturesUtils.refreshing = false
+    vim.notify("Could not start pytest: " .. tostring(err), vim.log.levels.WARN)
+  end
 end
 
 --- Determine if the a given filename is of python ft
@@ -327,9 +413,12 @@ end
 function PytestFixturesUtils.parse_fixtures_for_test(test_file_name, test_name)
   local _, project_hash = PytestFixturesUtils.get_current_project_and_hash()
   local project_fixture_file_path = PytestFixturesUtils.get_storage_path_for_project(project_hash)
-  local fixtures = PytestFixturesUtils.get_fixtures(project_fixture_file_path, "fixtures_by_test")
-  local function_fixtures = fixtures[test_file_name][test_name]
-  return function_fixtures
+  local fixtures, reason = PytestFixturesUtils.get_fixtures(project_fixture_file_path, "fixtures_by_test")
+  if reason then
+    return {}, reason
+  end
+  local tests = fixtures[test_file_name] or {}
+  return tests[test_name] or {}
 end
 
 --- Open a file at a specified line number
@@ -344,38 +433,26 @@ function PytestFixturesUtils.maybe_refresh_pytest_fixture_cache(buf_file, opts)
   if PytestFixturesUtils.refreshing then
     return
   end
-  PytestFixturesUtils.refreshing = true
 
   opts = opts or {}
-  PytestFixturesUtils.ensure_data_path_exists()
-  local refresh = false
-  for _ in string.gmatch(buf_file, "./*/test_.*.py") do
-    refresh = true
-  end
-  if not refresh then
+  local force = opts.force or false
+  local basename = vim.fn.fnamemodify(buf_file, ":t")
+  if not force and not (basename:match("^test_.*%.py$") or basename:match("_test%.py$")) then
     return
   end
 
-  local force = opts.force or false
-  local project_root, project_hash = PytestFixturesUtils.get_current_project_and_hash(buf_file)
-
-  if
-    PytestFixturesUtils.has_pytest()
-    and (
-      force
-      or (
-        project_root
-        and PytestFixturesUtils.is_python(buf_file)
-        and PytestFixturesUtils.should_refresh_fixtures(project_hash)
-      )
-    )
-  then
-    if PytestFixturesUtils.debug then
-      print("pytest_nvim refreshing cache for " .. vim.fn.expand("%:p"))
-    end
-    PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash)
+  local project_root = PytestFixturesUtils.get_project_root(buf_file)
+  if not project_root or not PytestFixturesUtils.has_pytest() then
+    return
   end
-  PytestFixturesUtils.refreshing = false
+  local project_hash = PytestFixturesUtils.generate_project_hash(project_root)
+  if not force and not PytestFixturesUtils.should_refresh_fixtures(project_hash) then
+    return
+  end
+
+  PytestFixturesUtils.ensure_data_path_exists()
+  PytestFixturesUtils.refreshing = true
+  PytestFixturesUtils.refresh_pytest_fixture_cache(project_hash, project_root)
 end
 
 function PytestFixturesUtils.ui_select(opts)
